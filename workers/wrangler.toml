@@ -1,0 +1,39 @@
+name = "chusme-auth-worker"
+main = "src/index.ts"
+compatibility_date = "2024-04-05"
+
+# Configuration for wrangler dev
+[dev]
+# Serve static assets from the public directory relative to wrangler.toml
+# This makes http://localhost:8787/ serve public/index.html
+# and other files like /js/main.js, /sw.js
+assets = "../public/dist"
+local_protocol = "http"
+port = 8787
+ip = "*"
+
+# Bindings for KV, DO, Secrets, etc.
+# See: https://developers.cloudflare.com/workers/wrangler/configuration/#bindings
+
+# KV Namespace for client registrations and metadata
+[[kv_namespaces]]
+binding = "CLIENT_REGISTRATIONS"
+id = "111ddcdd4a374095b07633e837f32fb3" # TODO: Replace with your actual KV namespace ID
+preview_id = "111ddcdd4a374095b07633e837f32fb3" # TODO: Replace with your preview KV namespace ID
+
+# Durable Object for potential FROST coordination
+# [durable_objects]
+# bindings = [
+#   { name = "FROST_COORDINATOR", class_name = "FrostCoordinator" }
+# ]
+
+# Secrets bindings (values are set via `wrangler secret put`)
+[[secrets]]
+binding = "MASTER_KEY"
+
+[[secrets]]
+binding = "VAPID_PRIVATE_KEY"
+
+# Environment variables (optional)
+# [vars]
+# MY_ENV_VAR = "my-production-value" 

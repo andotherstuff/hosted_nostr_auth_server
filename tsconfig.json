@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022", "dom", "WebWorker"],
+    "types": ["@cloudflare/workers-types"],
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "resolveJsonModule": true,
+    "isolatedModules": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

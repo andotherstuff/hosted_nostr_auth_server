@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chusme Auth - Nostr Key Vault & Signer</title>
+    <link rel="stylesheet" href="/styles.css"> <!-- Link to your CSS file -->
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; padding: 2em; max-width: 800px; margin: auto; }
+        h1, h2 { text-align: center; }
+        section { margin-bottom: 2em; padding: 1em; border: 1px solid #ccc; border-radius: 8px; }
+        pre { background-color: #f4f4f4; padding: 1em; border-radius: 4px; word-wrap: break-word; }
+        button { margin-top: 0.5em; }
+        #key-status { margin-top: 0.5em; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to Chusme Auth</h1>
+    <p style="text-align: center;">A Serverless, Non-Custodial Nostr Key Vault & Remote Signer</p>
+
+    <section id="about">
+        <h2>About</h2>
+        <p>
+            This service provides a secure way to manage your Nostr private key (<code>nsec</code>) and sign events 
+            without exposing your key to client applications. It acts as a NIP-46 compliant signer.
+        </p>
+        <p>
+            <strong>How it works:</strong>
+            <ul>
+                <li>Your <code>nsec</code> is encrypted <strong>locally in your browser</strong> using a strong password (Argon2id) and modern encryption (ChaCha20-Poly1305). It's stored securely in your browser's IndexedDB.</li>
+                <li><strong>Your private key never leaves your device.</strong></li>
+                <li>When a Nostr client needs you to sign an event (via NIP-46), it communicates with this service.</li>
+                <li>A secure backend (running on Cloudflare Workers) coordinates the request.</li>
+                <li>A Service Worker in your browser wakes up, prompts for your password if needed, decrypts your key locally, signs the event, and returns only the signature.</li>
+            </ul>
+        </p>
+        <p>
+            Built with Cloudflare Workers, KV, Durable Objects (for potential advanced features like FROST), and Secrets Store for maximum security and scalability at the edge.
+        </p>
+    </section>
+
+    <section id="key-management">
+        <h2>Key Management</h2>
+        <p>Manage your encrypted Nostr key below. You'll need a strong passphrase.</p>
+        <label for="passphrase">Passphrase:</label>
+        <input type="password" id="passphrase" name="passphrase" required>
+        <button id="generate-key">Generate & Encrypt New Key</button>
+        <button id="load-key">Load Encrypted Key</button>
+        <div id="key-status">Status: No key loaded.</div>
+    </section>
+
+    <section id="connection-info">
+        <h2>Connect Your Client (NIP-46)</h2>
+        <p>Once you have generated or loaded a key, use the following connection string in your NIP-46 compatible Nostr client (e.g., Damus, Amethyst, Snort.social):</p>
+        <pre id="nip46-connection-string">nostrconnect://&lt;YOUR_PUBKEY&gt;?relay=&lt;YOUR_WORKER_URL&gt;/connect</pre>
+        <button id="copy-connection-string">Copy</button>
+        <p><em>(The public key and worker URL will be automatically filled in once a key is loaded/generated).</em></p>
+    </section>
+
+    <script type="module" src="/src/main.ts"></script>
+    <script>
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js')
+                .then(registration => {
+                    console.log('Service Worker registered with scope:', registration.scope);
+                }).catch(error => {
+                    console.log('Service Worker registration failed:', error);
+                });
+        }
+    </script>
+</body>
+</html> 
