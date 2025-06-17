@@ -5,6 +5,18 @@ use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+// FROST imports
+use frost_secp256k1::{self as frost, Secp256K1Sha256, keys::KeyPackage};
+use frost_core::{
+    keys::{dkg, PublicKeyPackage, IdentifierList},
+    round1, round2,
+    Identifier,
+};
+use frost_secp256k1::rand_core::OsRng;
+
+// Type aliases for clarity
+type FrostIdentifier = Identifier<Secp256K1Sha256>;
+
 // Set up panic hook for better debugging
 #[wasm_bindgen(start)]
 pub fn main() {
@@ -126,17 +138,30 @@ pub fn keygen_round1(state_json: &str, participant_id: &str) -> String {
             });
         }
         
-        // Generate mock round 1 package for this participant
-        // TODO: Replace with real FROST implementation
-        let package_json = format!("{{\"participant\":\"{}\",\"mock_round1\":true}}", participant_id);
-        state.round1_packages.insert(participant_id.to_string(), package_json.clone());
+        // Generate real FROST DKG round 1 package
+        let identifier = FrostIdentifier::try_from(
+            (state.round1_packages.len() + 1) as u16
+        ).map_err(|e| FrostError::KeygenError(format!("Invalid identifier: {}", e)))?;
+        
+        let (round1_secret, round1_package) = dkg::part1(
+            identifier,
+            state.max_participants,
+            state.threshold,
+            &mut OsRng,
+        ).map_err(|e| FrostError::KeygenError(format!("DKG round 1 failed: {}", e)))?;
+        
+        // Serialize the round1 package for storage
+        let package_serialized = serde_json::to_string(&(round1_secret, round1_package))
+            .map_err(|e| FrostError::SerializationError(e.to_string()))?;
+        
+        state.round1_packages.insert(participant_id.to_string(), package_serialized.clone());
         
         // Check if we have enough participants to advance
         if state.round1_packages.len() >= state.threshold as usize {
             state.current_round = 2;
         }
         
-        Ok((state, package_json))
+        Ok((state, package_serialized))
     })();
     
     match result {
@@ -172,18 +197,55 @@ pub fn keygen_round2(
             ));
         }
         
-        // TODO: Implement actual round 2 processing with frost_secp256k1::keys::dkg::part2
-        // For now, generate mock key package
-        let mock_key_package = format!("{{\"participant\":\"{}\",\"mock_key\":true}}", participant_id);
-        state.key_packages.insert(participant_id.to_string(), mock_key_package.clone());
+        // Parse round 1 packages to get all participant data
+        let all_round1_packages: BTreeMap<String, String> = serde_json::from_str(round1_packages_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to parse round1 packages: {}", e)))?;
         
-        // If all participants have completed, generate group public key
-        if state.key_packages.len() >= state.threshold as usize {
-            let mock_group_key = "{\"group_public_key\":\"mock_group_key\"}".to_string();
-            state.group_public_key = Some(mock_group_key);
+        // Get this participant's round 1 secret and package
+        let participant_round1_data = state.round1_packages.get(participant_id)
+            .ok_or(FrostError::InvalidParticipant(format!("Participant {} not found in round 1", participant_id)))?;
+        
+        // Deserialize the participant's round 1 secret and package
+        let (round1_secret, _round1_package): (dkg::round1::SecretPackage<Secp256K1Sha256>, dkg::round1::Package<Secp256K1Sha256>) = 
+            serde_json::from_str(participant_round1_data)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize round1 secret: {}", e)))?;
+        
+        // Collect all round 1 packages from other participants
+        let mut received_round1_packages = BTreeMap::new();
+        for (other_participant, package_data) in &all_round1_packages {
+            if other_participant != participant_id {
+                let (_secret, package): (dkg::round1::SecretPackage<Secp256K1Sha256>, dkg::round1::Package<Secp256K1Sha256>) = 
+                    serde_json::from_str(package_data)
+                        .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize package for {}: {}", other_participant, e)))?;
+                
+                // Map participant name to identifier
+                let identifier = FrostIdentifier::try_from(
+                    (received_round1_packages.len() + 2) as u16  // +1 for this participant, +1 for 1-based indexing
+                ).map_err(|e| FrostError::KeygenError(format!("Invalid identifier for {}: {}", other_participant, e)))?;
+                
+                received_round1_packages.insert(identifier, package);
+            }
         }
         
-        Ok((state, mock_key_package))
+        // Perform DKG round 2
+        let (key_package, group_public_key) = dkg::part2(round1_secret, &received_round1_packages)
+            .map_err(|e| FrostError::KeygenError(format!("DKG round 2 failed: {}", e)))?;
+        
+        // Serialize the key package for storage
+        let key_package_serialized = serde_json::to_string(&key_package)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to serialize key package: {}", e)))?;
+        
+        // Store the key package
+        state.key_packages.insert(participant_id.to_string(), key_package_serialized.clone());
+        
+        // If all participants have completed, store the group public key
+        if state.key_packages.len() >= state.threshold as usize {
+            let group_public_key_serialized = serde_json::to_string(&group_public_key)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to serialize group public key: {}", e)))?;
+            state.group_public_key = Some(group_public_key_serialized);
+        }
+        
+        Ok((state, key_package_serialized))
     })();
     
     match result {
@@ -251,16 +313,29 @@ pub fn signing_round1(state_json: &str, participant_id: &str, key_package_json: 
             ));
         }
         
-        // TODO: Implement actual nonce generation with frost_secp256k1::round1
-        let mock_nonces = format!("{{\"participant\":\"{}\",\"nonces\":\"mock_nonces\"}}", participant_id);
-        state.round1_packages.insert(participant_id.to_string(), mock_nonces.clone());
+        // Deserialize the key package for this participant
+        let key_package: KeyPackage = serde_json::from_str(key_package_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize key package: {}", e)))?;
+        
+        // Generate nonces for signing round 1
+        let (nonces, commitments) = round1::commit(key_package.signing_share(), &mut OsRng);
+        
+        // Serialize the nonces and commitments for storage
+        let round1_data = serde_json::to_string(&(nonces, commitments))
+            .map_err(|e| FrostError::SerializationError(format!("Failed to serialize round1 data: {}", e)))?;
+        
+        state.round1_packages.insert(participant_id.to_string(), round1_data.clone());
         
         // Check if we have enough participants to advance
         if state.round1_packages.len() >= state.signers.len() {
             state.current_round = 2;
         }
         
-        Ok((state, mock_nonces))
+        // Return the commitments (public part) for coordination
+        let commitments_serialized = serde_json::to_string(&commitments)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to serialize commitments: {}", e)))?;
+        
+        Ok((state, commitments_serialized))
     })();
     
     match result {
@@ -279,7 +354,8 @@ pub fn signing_round2(
     state_json: &str,
     participant_id: &str,
     key_package_json: &str,
-    signing_package_json: &str
+    signing_package_json: &str,
+    group_public_key_json: &str
 ) -> String {
     let result = (|| -> Result<(SigningState, Option<String>), FrostError> {
         let state_result: FrostResult<SigningState> = serde_json::from_str(state_json)
@@ -295,15 +371,60 @@ pub fn signing_round2(
             ));
         }
         
-        // TODO: Implement actual signature share generation with frost_secp256k1::round2
-        let mock_signature_share = format!("{{\"participant\":\"{}\",\"signature_share\":\"mock_share\"}}", participant_id);
-        state.signature_shares.insert(participant_id.to_string(), mock_signature_share);
+        // Deserialize the key package for this participant
+        let key_package: KeyPackage = serde_json::from_str(key_package_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize key package: {}", e)))?;
+        
+        // Deserialize the signing package (contains message and all commitments)  
+        let signing_package: frost::SigningPackage = serde_json::from_str(signing_package_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize signing package: {}", e)))?;
+        
+        // Get this participant's nonces from round 1
+        let participant_round1_data = state.round1_packages.get(participant_id)
+            .ok_or(FrostError::InvalidParticipant(format!("Participant {} not found in round 1", participant_id)))?;
+        
+        let (nonces, _commitments): (frost::round1::SigningNonces, frost::round1::SigningCommitments) = 
+            serde_json::from_str(participant_round1_data)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize nonces: {}", e)))?;
+        
+        // Generate signature share
+        let signature_share = round2::sign(&signing_package, &nonces, &key_package)
+            .map_err(|e| FrostError::SigningError(format!("Failed to generate signature share: {}", e)))?;
+        
+        // Serialize and store the signature share
+        let signature_share_serialized = serde_json::to_string(&signature_share)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to serialize signature share: {}", e)))?;
+        
+        state.signature_shares.insert(participant_id.to_string(), signature_share_serialized.clone());
         
         // If all participants have signed, aggregate the signature
         let final_signature = if state.signature_shares.len() >= state.signers.len() {
-            let mock_final_sig = "{\"signature\":\"mock_final_signature\"}".to_string();
-            state.final_signature = Some(mock_final_sig.clone());
-            Some(mock_final_sig)
+            // Deserialize the group public key package from keygen
+            let group_public_key: PublicKeyPackage<Secp256K1Sha256> = serde_json::from_str(group_public_key_json)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize group public key: {}", e)))?;
+            
+            // Collect all signature shares with proper identifier mapping
+            let mut signature_shares = BTreeMap::new();
+            for (idx, (participant, share_data)) in state.signature_shares.iter().enumerate() {
+                let share: round2::SignatureShare<Secp256K1Sha256> = serde_json::from_str(share_data)
+                    .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize share for {}: {}", participant, e)))?;
+                
+                // Map participant to identifier based on order (consistent with keygen)
+                let identifier = FrostIdentifier::try_from((idx + 1) as u16)
+                    .map_err(|e| FrostError::SigningError(format!("Invalid identifier for {}: {}", participant, e)))?;
+                
+                signature_shares.insert(identifier, share);
+            }
+            
+            // Aggregate the signature using real FROST
+            let group_signature = frost::aggregate(&signing_package, &signature_shares, &group_public_key)
+                .map_err(|e| FrostError::SigningError(format!("Failed to aggregate signature: {}", e)))?;
+            
+            let final_sig_serialized = serde_json::to_string(&group_signature)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to serialize final signature: {}", e)))?;
+            
+            state.final_signature = Some(final_sig_serialized.clone());
+            Some(final_sig_serialized)
         } else {
             None
         };
@@ -338,17 +459,41 @@ pub fn generate_frost_shares(
             });
         }
         
-        // TODO: Implement actual trusted dealer key generation using frost_secp256k1::keys::generate_with_dealer
-        // For now, return mock shares
-        let mut mock_shares = BTreeMap::new();
+        // For now, we'll use the default trusted dealer which generates its own secret
+        // In future, we could use the provided private_key_hex but that requires additional implementation
+        let _ = private_key_hex; // Acknowledge the parameter
+        
+        // Create identifiers for all participants
+        let mut identifiers = Vec::new();
         for i in 1..=max_participants {
-            let share_data = format!("{{\"participant\":{},\"share\":\"mock_share_{}\"}}", i, i);
-            mock_shares.insert(format!("participant_{}", i), share_data);
+            let identifier = FrostIdentifier::try_from(i)
+                .map_err(|e| FrostError::KeygenError(format!("Invalid identifier {}: {}", i, e)))?;
+            identifiers.push(identifier);
         }
         
-        let mock_group_public_key = "mock_group_public_key".to_string();
+        // Generate key shares using trusted dealer
+        let (shares, group_public_key) = frost::keys::generate_with_dealer(
+            max_participants,
+            threshold,
+            IdentifierList::Custom(&identifiers),
+            &mut OsRng,
+        ).map_err(|e| FrostError::KeygenError(format!("Trusted dealer failed: {}", e)))?;
         
-        Ok((mock_group_public_key, mock_shares))
+        // Serialize shares
+        let mut serialized_shares = BTreeMap::new();
+        for (identifier, key_package) in shares {
+            let share_data = serde_json::to_string(&key_package)
+                .map_err(|e| FrostError::SerializationError(format!("Failed to serialize share: {}", e)))?;
+            // Use the identifier as-is in string format for now
+            let participant_key = format!("participant_{:?}", identifier);
+            serialized_shares.insert(participant_key, share_data);
+        }
+        
+        // Serialize group public key
+        let group_public_key_serialized = serde_json::to_string(&group_public_key)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to serialize group public key: {}", e)))?;
+        
+        Ok((group_public_key_serialized, serialized_shares))
     })();
     
     match result {
@@ -369,9 +514,18 @@ pub fn verify_signature(
     group_public_key_json: &str
 ) -> String {
     let result = (|| -> Result<bool, FrostError> {
-        // TODO: Implement actual signature verification
-        // For now, return mock verification
-        Ok(true)
+        // Deserialize the signature
+        let signature: frost::Signature = serde_json::from_str(signature_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize signature: {}", e)))?;
+        
+        // Deserialize the group public key  
+        let group_public_key: PublicKeyPackage<Secp256K1Sha256> = serde_json::from_str(group_public_key_json)
+            .map_err(|e| FrostError::SerializationError(format!("Failed to deserialize group public key: {}", e)))?;
+        
+        // Verify the signature using FROST
+        let verification_result = group_public_key.verifying_key().verify(message, &signature);
+        
+        Ok(verification_result.is_ok())
     })();
     
     match result {

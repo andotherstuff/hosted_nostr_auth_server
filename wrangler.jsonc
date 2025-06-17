@@ -11,5 +11,19 @@
       "database_name": "chusme-auth-users",
       "database_id": "0617cc74-8306-4cf5-8678-f1e107ad8bd9"
     }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FROST_CEREMONY",
+        "class_name": "FrostCeremonyDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["FrostCeremonyDO"]
+    }
   ]
 } 

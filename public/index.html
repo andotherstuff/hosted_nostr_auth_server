@@ -3,71 +3,104 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chusme Auth - Nostr Key Vault & Signer</title>
-    <link rel="stylesheet" href="/styles.css"> <!-- Link to your CSS file -->
+    <title>NostrPassportServer - Secure Threshold Signing</title>
+    <link rel="stylesheet" href="/styles.css">
     <style>
         body { font-family: sans-serif; line-height: 1.6; padding: 2em; max-width: 800px; margin: auto; }
         h1, h2 { text-align: center; }
         section { margin-bottom: 2em; padding: 1em; border: 1px solid #ccc; border-radius: 8px; }
         pre { background-color: #f4f4f4; padding: 1em; border-radius: 4px; word-wrap: break-word; }
-        button { margin-top: 0.5em; }
+        button { margin-top: 0.5em; padding: 0.5em 1em; }
+        input { padding: 0.5em; margin: 0.25em; }
         #key-status { margin-top: 0.5em; font-weight: bold; }
+        .form-group { margin-bottom: 1em; }
+        .form-group label { display: block; margin-bottom: 0.25em; }
+        .hidden { display: none; }
+        .security-notice { background-color: #e8f5e8; border: 1px solid #4caf50; padding: 1em; border-radius: 4px; margin-bottom: 1em; }
     </style>
 </head>
 <body>
-    <h1>Welcome to Chusme Auth</h1>
-    <p style="text-align: center;">A Serverless, Non-Custodial Nostr Key Vault & Remote Signer</p>
+    <h1>NostrPassportServer</h1>
+    <p style="text-align: center;">Secure Nostr Authentication with Hardware-Protected Keys & FROST Threshold Signatures</p>
+
+    <div class="security-notice">
+        <strong>🔒 Security Notice:</strong> This service uses hardware security modules (HSM) to protect your private keys and FROST threshold signatures for enhanced security. Your keys are never stored in your browser.
+    </div>
 
     <section id="about">
         <h2>About</h2>
         <p>
-            This service provides a secure way to manage your Nostr private key (<code>nsec</code>) and sign events 
-            without exposing your key to client applications. It acts as a NIP-46 compliant signer.
+            NostrPassportServer provides enterprise-grade security for Nostr authentication using:
         </p>
+        <ul>
+            <li><strong>Hardware Security Modules (HSM):</strong> Your private keys are protected by tamper-resistant hardware</li>
+            <li><strong>FROST Threshold Signatures:</strong> Distributed signing for enhanced availability and security</li>
+            <li><strong>Zero Browser Storage:</strong> No sensitive data stored in your browser - everything is server-side</li>
+            <li><strong>NIP-46 Compatible:</strong> Works with all standard Nostr clients</li>
+            <li><strong>Mobile Recovery:</strong> Secure recovery via mobile keychain integration</li>
+        </ul>
         <p>
-            <strong>How it works:</strong>
-            <ul>
-                <li>Your <code>nsec</code> is encrypted <strong>locally in your browser</strong> using a strong password (Argon2id) and modern encryption (ChaCha20-Poly1305). It's stored securely in your browser's IndexedDB.</li>
-                <li><strong>Your private key never leaves your device.</strong></li>
-                <li>When a Nostr client needs you to sign an event (via NIP-46), it communicates with this service.</li>
-                <li>A secure backend (running on Cloudflare Workers) coordinates the request.</li>
-                <li>A Service Worker in your browser wakes up, prompts for your password if needed, decrypts your key locally, signs the event, and returns only the signature.</li>
-            </ul>
-        </p>
-        <p>
-            Built with Cloudflare Workers, KV, Durable Objects (for potential advanced features like FROST), and Secrets Store for maximum security and scalability at the edge.
+            Built on Cloudflare Workers edge infrastructure for global low-latency access with enterprise security standards.
         </p>
     </section>
 
-    <section id="key-management">
-        <h2>Key Management</h2>
-        <p>Manage your encrypted Nostr key below. You'll need a strong passphrase.</p>
-        <label for="passphrase">Passphrase:</label>
-        <input type="password" id="passphrase" name="passphrase" required>
-        <button id="generate-key">Generate & Encrypt New Key</button>
-        <button id="load-key">Load Encrypted Key</button>
-        <div id="key-status">Status: No key loaded.</div>
+    <!-- Login Form (hidden when authenticated) -->
+    <section id="login-form">
+        <h2>Authentication</h2>
+        <p>Sign in to access your secure Nostr signing service:</p>
+        <div class="form-group">
+            <label for="username">Username:</label>
+            <input type="text" id="username" name="username" required autocomplete="username">
+        </div>
+        <div class="form-group">
+            <label for="password">Password:</label>
+            <input type="password" id="password" name="password" required autocomplete="current-password">
+        </div>
+        <button id="login-btn">Login</button>
+    </section>
+
+    <!-- Main App (hidden when not authenticated) -->
+    <section id="main-app" class="hidden">
+        <h2>Secure Signing Service</h2>
+        <div id="key-status">Checking authentication...</div>
+        
+        <div class="form-group">
+            <h3>Test Message Signing</h3>
+            <label for="message-input">Message to sign:</label>
+            <input type="text" id="message-input" placeholder="Enter a message to sign" style="width: 100%; max-width: 400px;">
+            <button id="sign-message-btn">Sign Message</button>
+        </div>
+
+        <div class="form-group">
+            <button id="logout-btn">Logout</button>
+        </div>
     </section>
 
     <section id="connection-info">
         <h2>Connect Your Client (NIP-46)</h2>
-        <p>Once you have generated or loaded a key, use the following connection string in your NIP-46 compatible Nostr client (e.g., Damus, Amethyst, Snort.social):</p>
-        <pre id="nip46-connection-string">nostrconnect://&lt;YOUR_PUBKEY&gt;?relay=&lt;YOUR_WORKER_URL&gt;/connect</pre>
-        <button id="copy-connection-string">Copy</button>
-        <p><em>(The public key and worker URL will be automatically filled in once a key is loaded/generated).</em></p>
+        <p>Use the following connection string in your NIP-46 compatible Nostr client:</p>
+        <pre id="nip46-connection-string">Please authenticate to get your connection string</pre>
+        <button id="copy-connection-string">Copy Connection String</button>
+        <p><em>Compatible with Damus, Amethyst, Snort.social, and other NIP-46 clients.</em></p>
+    </section>
+
+    <section id="security-features">
+        <h2>Security Features</h2>
+        <ul>
+            <li><strong>HSM Protection:</strong> Private keys stored in FIPS 140-2 Level 3 hardware security modules</li>
+            <li><strong>Threshold Signatures:</strong> FROST distributed signing prevents single points of failure</li>
+            <li><strong>Session-Based Auth:</strong> Secure, stateless authentication with automatic token rotation</li>
+            <li><strong>Rate Limiting:</strong> Protection against abuse and DoS attacks</li>
+            <li><strong>Audit Logging:</strong> Comprehensive security event tracking</li>
+            <li><strong>Mobile Recovery:</strong> Secure key recovery via mobile device keychain</li>
+        </ul>
     </section>
 
     <script type="module" src="/src/main.ts"></script>
     <script>
-        // Register Service Worker
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js')
-                .then(registration => {
-                    console.log('Service Worker registered with scope:', registration.scope);
-                }).catch(error => {
-                    console.log('Service Worker registration failed:', error);
-                });
-        }
+        // Note: Service Worker removed in favor of stateless architecture
+        // All signing operations now happen server-side with HSM/FROST
+        console.log('NostrPassportServer client initializing...');
     </script>
 </body>
-</html> 
+</html>
